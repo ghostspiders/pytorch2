@@ -14,13 +14,17 @@ namespace c10 {
 namespace details {
 
 /**
- * If Arg is a Tensor or reference to a Tensor, provide the member constant value equal to true.  Otherwise
- * return false.
+ * 检查类型 Arg 是否是 Tensor 或其引用类型。
+ * 如果是，则成员常量 value 为 true，否则为 false。
  */
 template <class Arg>
 using is_tensor_arg = std::
     is_same<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
+/**
+ * 将 DeviceType 转换为 DeviceTypeId。
+ * 用于统一设备类型的标识。
+ */
 inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   switch (device_type) {
     case DeviceType::CPU:
@@ -32,7 +36,10 @@ inline DeviceTypeId to_device_type_id(DeviceType device_type) {
   }
 }
 
-// TODO get rid of tensor_to_dispatch_key once c2::Tensor is de-templatized. This then fits into a template lambda instead of a functor.
+/**
+ * 将 Tensor 转换为 DispatchKey 的辅助工具。
+ * 提取 Tensor 的设备类型、布局和数据类型，组合成 DispatchKey。
+ */
 struct tensor_to_dispatch_key final {
     template<class TensorType>
     TensorParameterDispatchKey operator()(const TensorType& tensor) const {
@@ -44,22 +51,17 @@ struct tensor_to_dispatch_key final {
 };
 
 /**
- * Extract the type ids of all tensors in a variadic list of arguments
- *
- * @tparam Args Inferred variadic list of argument types
- * @param args List of arguments to get type ids from
- * @return guts::array<TensorParameterDispatchKey, n>, where n is the number of tensor arguments (is_tensor_arg) in the class
+ * 从可变参数列表中提取所有 Tensor 参数的类型信息。
+ * 返回一个包含 Tensor 参数 DispatchKey 的数组。
  */
 template<class... Args> auto getTensorTypeIds_(const Args&... args)
 -> guts::array<TensorParameterDispatchKey, guts::typelist::count_if<is_tensor_arg, guts::typelist::typelist<Args...>>::value> {
   return guts::filter_map<TensorParameterDispatchKey, is_tensor_arg>(tensor_to_dispatch_key(), args...);
 }
 
-// TODO Test getTensorTypeIds_
-
 /**
- * If T is a struct with a type field Signature, provides the member constant
- * @tparam T
+ * 检查类型 T 是否定义了 Signature 类型。
+ * 用于编译期验证算子定义是否合法。
  */
 template<class T, typename = void>
 struct has_signature_defined : std::false_type {};
@@ -68,8 +70,10 @@ struct has_signature_defined<T, guts::void_t<
   typename T::Signature
 >> : std::true_type {};
 
-// TODO Test has_signature_defined
-
+/**
+ * 检查类型 T 是否定义了 parameter_names 成员。
+ * 用于验证算子是否提供了参数名称列表。
+ */
 template<class T, typename = void>
 struct has_parameter_names_defined : std::false_type {};
 template<class T>
@@ -77,8 +81,10 @@ struct has_parameter_names_defined<T, guts::void_t<
   decltype(T::parameter_names)
 >> : std::true_type {};
 
-// TODO Test has_parameter_names_defined
-
+/**
+ * 检查类型 T 是否定义了 name 成员。
+ * 用于验证算子是否提供了名称。
+ */
 template<class T, typename = void>
 struct has_name_defined : std::false_type {};
 template<class T>
@@ -86,12 +92,9 @@ struct has_name_defined<T, guts::void_t<
         decltype(T::name)
 >> : std::true_type {};
 
-// TODO Test has_name_defined
-
 /**
- * Wrapper class around a user-provided schema definition some useful information about the schema.
- *
- * @tparam OpSchemaDef Operator schema definition.  See OpSchema for more details.
+ * 封装算子签名的解析功能。
+ * 提取算子的函数类型、返回值类型、参数类型等信息。
  */
 template<class OpSchemaDef> class OpSignatureSchema final {
   static_assert(details::has_signature_defined<OpSchemaDef>::value, "Operator schema doesn't define a valid Signature member type.");
@@ -99,46 +102,26 @@ template<class OpSchemaDef> class OpSignatureSchema final {
 
   using signature_traits = guts::function_traits<typename OpSchemaDef::Signature>;
 public:
-  /**
-   * The function type OpSchemaDef::Signature
-   */
-  using func_type = typename signature_traits::func_type;
-  /**
-   * The return type of the function OpSchemaDef::Signature
-   */
-  using return_type = typename signature_traits::return_type;
-  /**
-   * A type list of the parameter types of OpSchemaDef::Signature
-   */
-  using parameter_types = typename signature_traits::parameter_types;
+  using func_type = typename signature_traits::func_type;  // 算子函数类型
+  using return_type = typename signature_traits::return_type;  // 返回值类型
+  using parameter_types = typename signature_traits::parameter_types;  // 参数类型列表
 
-  /**
-   * The number of arguments of OpSchemaDef::Signature
-   */
-  static constexpr size_t num_args = guts::typelist::size<parameter_types>::value;
-  /**
-   * The number of tensor arguments (as per is_tensor_arg) in OpSchemaDef::Signature
-   */
-  static constexpr size_t num_tensor_args = guts::typelist::count_if<details::is_tensor_arg, parameter_types>::value;
+  static constexpr size_t num_args = guts::typelist::size<parameter_types>::value;  // 参数数量
+  static constexpr size_t num_tensor_args = guts::typelist::count_if<details::is_tensor_arg, parameter_types>::value;  // Tensor 参数数量
 
 private:
   static_assert(details::has_parameter_names_defined<OpSchemaDef>::value, "Operator schema doesn't define parameter_names member.");
-  // TODO Allow simpler definition of parameter_names without having to spell out the guts::array type in the schema def.
   static_assert(std::is_same<const guts::array<const char*, num_args>, decltype(OpSchemaDef::parameter_names)>::value, "Operator schema defines parameter_names member, but it isn't the correct type. Must be a static constexpr guts::array of const char* with one entry for each parameter.");
 
 public:
-  /**
-   * The names of the parameters (as per OpSchemaDef::parameter_names)
-   * @return Array
-   */
   static constexpr const guts::array<const char*, num_args>& parameter_names() {
-    return OpSchemaDef::parameter_names;
+    return OpSchemaDef::parameter_names;  // 返回参数名称列表
   }
 };
 
 /**
- * If T has a method dispatch_key, provide a member constant value equal to true.  Otherwise return false.
- * @tparam T
+ * 检查类型 T 是否定义了 dispatch_key 方法。
+ * 用于判断算子是否自定义了 DispatchKey 生成逻辑。
  */
 template<class T, typename = void>
 struct has_function_dispatch_key_defined : std::false_type {};
@@ -148,40 +131,32 @@ struct has_function_dispatch_key_defined<T, guts::void_t<
 >> : std::true_type {};
 
 /**
- * Wrapper class around a user-defined schema definition providing a way of computing a dispatch key
- * from arguments matching the signature of that schema.
- *
- * @tparam OpSchemaDef Operator schema definition.  See OpSchema for more details.
- * @tparam Enable Inferred, used to control specialization
+ * 默认的 DispatchKey 生成器。
+ * 根据 Tensor 参数自动生成 DispatchKey。
  */
-template<class OpSchemaDef, class Enable = void> class OpDispatchKeySchema final {};
-
-// General case. Operator doesn't overwrite DispatchKey generation. Use default.
 template<class OpSchemaDef>
 class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
-
-  // TODO Static assert that dispatch_key_type has operator<<(ostream, _) defined for debug output.
-  // TODO Use an ADL-based debugString(DispatchKey) function instead of operator<< for debug printing.
-
 public:
   using dispatch_key_type = DispatchKey<signature::num_tensor_args>;
 
   template<class... Args>
   static inline dispatch_key_type dispatch_key(const Args&... args) {
-    using guts::typelist::map_t;
-    using guts::typelist::typelist;
+    // 检查参数类型是否匹配算子签名
     static_assert(std::is_same<
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
+      guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, guts::typelist::typelist<Args...>>>,
+      guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
     return dispatch_key_type {
-      details::getTensorTypeIds_(args...)
+      details::getTensorTypeIds_(args...)  // 提取 Tensor 参数的类型信息
     };
   }
 };
 
-// Special case. Operator overwrites DispatchKey generation. Use that.
+/**
+ * 自定义 DispatchKey 生成器。
+ * 使用算子定义的 dispatch_key 方法生成 DispatchKey。
+ */
 template<class OpSchemaDef>
 class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
@@ -194,29 +169,31 @@ public:
   using dispatch_key_type = typename dispatch_key_traits::return_type;
 
 private:
-
+  // 检查 DispatchKey 类型是否支持比较和哈希
   static_assert(guts::is_equality_comparable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have the equality operator defined. Please define it.");
   static_assert(guts::is_hashable<dispatch_key_type>::value, "Operator schema specified custom dispatch_key() derivation function, but the returned dispatch key type doesn't have an overload for std::hash. Please define it.");
 
+  // 检查自定义 dispatch_key 方法的参数是否匹配算子签名
   static_assert(std::is_same<
     guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename dispatch_key_traits::parameter_types>>,
     guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename signature::parameter_types>>
     >::value, "Operator schema defines custom dispatch_key() derivation function, but the arguments don't match the operator signature.");
 
 public:
-
   template<class... Args>
   static inline dispatch_key_type dispatch_key(const Args&... args) {
-    using guts::typelist::map_t;
-    using guts::typelist::typelist;
+    // 检查参数类型是否匹配算子签名
     static_assert(std::is_same<
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typelist<Args...>>>,
-      map_t<guts::remove_cv_t, map_t<guts::remove_reference_t, typename signature::parameter_types>>
+      guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, guts::typelist::typelist<Args...>>>,
+      guts::typelist::map_t<guts::remove_cv_t, guts::typelist::map_t<guts::remove_reference_t, typename signature::parameter_types>>
       >::value, "Invalid argument types passed to OpSchema::dispatch_key()");
-    return OpSchemaDef::dispatch_key(args...);
+    return OpSchemaDef::dispatch_key(args...);  // 调用自定义的 dispatch_key 方法
   }
 };
 
+/**
+ * 封装算子的元信息，如算子名称。
+ */
 template<class OpSchemaDef>
 class OpMetadataSchema final {
 private:
@@ -225,37 +202,22 @@ private:
 
 public:
     static constexpr const char* name() {
-        return OpSchemaDef::name;
+        return OpSchemaDef::name;  // 返回算子名称
     }
 };
 
 }  // namespace details
 
 /**
- * Wrapper class for user-defined OpSchemaDef, providing functionality for determining
- * information about the signature and dispatching on that signature.  This is the
- * "public" facing class.
- *
- * @tparam OpSchemaDef User-defined OpSchemaDef.
- *   This struct is expected to define:
- *      - a function type Signature
- *      - a constexpr guts<const char*, n_args> parameter_names field (where n_args is
- *        the number of arguments in Signature)
+ * 对外的算子 Schema 接口。
+ * 组合了元信息、签名解析和派发功能。
  */
 template <class OpSchemaDef>
 class CAFFE2_API OpSchema final {
-  // TODO static_assert OpSchemaDef isn't an instanciation of OpSchema. If yes, the caller probably passed an OpSchema somewhere where an OpSchemaDef was expected and wants a good error message.
 public:
-  using metadata = details::OpMetadataSchema<OpSchemaDef>;
-  /**
-   * Information about the signature
-   */
-  using signature = details::OpSignatureSchema<OpSchemaDef>;
-  /**
-   * Functionality for dispatching on that signature
-   */
-  using dispatch = details::OpDispatchKeySchema<OpSchemaDef>;
+  using metadata = details::OpMetadataSchema<OpSchemaDef>;  // 元信息
+  using signature = details::OpSignatureSchema<OpSchemaDef>;  // 签名解析
+  using dispatch = details::OpDispatchKeySchema<OpSchemaDef>;  // 派发逻辑
 };
 
-// TODO test OpSchema::dispatch stuff
 }  // namespace c10
