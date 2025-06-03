@@ -1,96 +1,92 @@
-#pragma once
-#include <ATen/Utils.h>
-#include <c10/util/ArrayRef.h>
+#pragma once  // 防止头文件重复包含
 
-#include <vector>
+#include <ATen/Utils.h>  // ATen工具函数
+#include <c10/util/ArrayRef.h>  // 基础数组引用类
+#include <vector>  // 标准向量容器
 
 namespace at {
-  /// MatrixRef - Like an ArrayRef, but with an extra recorded strides so that
-  /// we can easily view it as a multidimensional array.
+  /// MatrixRef - 类似ArrayRef，但额外记录步长(stride)以便作为多维数组视图
   ///
-  /// Like ArrayRef, this class does not own the underlying data, it is expected
-  /// to be used in situations where the data resides in some other buffer.
+  /// 与ArrayRef类似，此类不拥有底层数据，适用于数据存在于其他缓冲区的情况
   ///
-  /// This is intended to be trivially copyable, so it should be passed by
-  /// value.
+  /// 设计为可简单复制的类型，应通过值传递
   ///
-  /// For now, 2D only (so the copies are actually cheap, without having
-  /// to write a SmallVector class) and contiguous only (so we can
-  /// return non-strided ArrayRef on index).
+  /// 当前仅支持2D连续布局(可返回非跨步的ArrayRef)
   ///
-  /// P.S. dimension 0 indexes rows, dimension 1 indexes columns
+  /// 注意：维度0索引行，维度1索引列
   template<typename T>
   class MatrixRef {
   public:
-    typedef size_t size_type;
+    typedef size_t size_type;  // 尺寸类型定义
 
   private:
-    /// Underlying ArrayRef
+    /// 底层数据引用
     ArrayRef<T> arr;
 
-    /// Stride of dim 0 (outer dimension)
+    /// 外层维度(维度0)的步长
     size_type stride0;
 
-    // Stride of dim 1 is assumed to be 1
+    // 内层维度(维度1)的步长固定为1
 
   public:
-    /// Construct an empty Matrixref.
+    /// 构造空MatrixRef
     /*implicit*/ MatrixRef() : arr(nullptr), stride0(0) {}
 
-    /// Construct an MatrixRef from an ArrayRef and outer stride.
+    /// 从ArrayRef和外部步长构造MatrixRef
     /*implicit*/ MatrixRef(ArrayRef<T> arr, size_type stride0)
       : arr(arr), stride0(stride0) {
-        AT_CHECK(arr.size() % stride0 == 0, "MatrixRef: ArrayRef size ", arr.size(), " not divisible by stride ", stride0)
+        // 验证数组大小能被步长整除
+        AT_CHECK(arr.size() % stride0 == 0, 
+                "MatrixRef: ArrayRef size ", arr.size(), 
+                " not divisible by stride ", stride0)
       }
 
-    /// @}
-    /// @name Simple Operations
+    /// @name 简单操作
     /// @{
 
-    /// empty - Check if the matrix is empty.
+    /// 检查矩阵是否为空
     bool empty() const { return arr.empty(); }
 
+    /// 获取底层数据指针
     const T *data() const { return arr.data(); }
 
-    /// size - Get size a dimension
+    /// 获取指定维度大小
     size_t size(size_t dim) const {
       if (dim == 0) {
-        return arr.size() / stride0;
+        return arr.size() / stride0;  // 行数 = 总元素数 / 列数
       } else if (dim == 1) {
-        return stride0;
+        return stride0;  // 列数 = 步长
       } else {
-        AT_CHECK(0, "MatrixRef: out of bounds dimension ", dim, "; expected 0 or 1");
+        AT_CHECK(0, "MatrixRef: out of bounds dimension ", 
+                dim, "; expected 0 or 1");
       }
     }
 
+    /// 获取元素总数
     size_t numel() const {
       return arr.size();
     }
 
-    /// equals - Check for element-wise equality.
+    /// 检查元素级相等性
     bool equals(MatrixRef RHS) const {
       return stride0 == RHS.stride0 && arr.equals(RHS.arr);
     }
 
     /// @}
-    /// @name Operator Overloads
+    /// @name 运算符重载
     /// @{
+    
+    /// 下标运算符，返回指定行的ArrayRef
     ArrayRef<T> operator[](size_t Index) const {
       return arr.slice(Index*stride0, stride0);
     }
 
-    /// Disallow accidental assignment from a temporary.
-    ///
-    /// The declaration here is extra complicated so that "arrayRef = {}"
-    /// continues to select the move assignment operator.
+    /// 禁止从临时对象赋值(通过SFINAE实现)
     template <typename U>
     typename std::enable_if<std::is_same<U, T>::value, MatrixRef<T>>::type &
     operator=(U &&Temporary) = delete;
 
-    /// Disallow accidental assignment from a temporary.
-    ///
-    /// The declaration here is extra complicated so that "arrayRef = {}"
-    /// continues to select the move assignment operator.
+    /// 禁止从初始化列表赋值(通过SFINAE实现)
     template <typename U>
     typename std::enable_if<std::is_same<U, T>::value, MatrixRef<T>>::type &
     operator=(std::initializer_list<U>) = delete;
