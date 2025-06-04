@@ -19,30 +19,76 @@ ENDIF()
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 
-# NB: If you edit these globs, you'll have to update setup.py package_data as well
+# 注意：如果修改了这些文件匹配规则(globs)，
+#       必须同步更新 setup.py 中的 package_data 配置
+# -----------------------------------------------------------
+# 基础 CPU 相关文件 (所有平台通用)
+# -----------------------------------------------------------
+# 收集基础头文件:
+#   - 当前目录所有 .h 文件
+#   - detail/ 子目录所有 .h 文件
+#   - cpu/ 子目录所有 .h 文件
 FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
+
+# 收集基础 C++ 实现文件
 FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
+
+# 添加核心代码子目录
 add_subdirectory(core)
+
+# -----------------------------------------------------------
+# CUDA 相关文件 (NVIDIA GPU支持)
+# -----------------------------------------------------------
+# CUDA 头文件:
+#   - cuda/ 目录的头文件和 .cuh (CUDA头文件)
+#   - 包含子目录 detail/
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
+
+# CUDA C++ 实现文件 (.cpp)
 FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
+
+# CUDA 内核文件 (.cu)
 FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
-FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
-FILE(GLOB cudnn_cpp "cudnn/*.cpp")
-FILE(GLOB miopen_h "miopen/*.h")
-FILE(GLOB miopen_cpp "miopen/*.cpp")
+
+# -----------------------------------------------------------
+# cuDNN 相关文件 (NVIDIA 深度神经网络库)
+# -----------------------------------------------------------
+FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")    # cuDNN 头文件
+FILE(GLOB cudnn_cpp "cudnn/*.cpp")               # cuDNN C++ 实现
+
+# -----------------------------------------------------------
+# MIOpen 相关文件 (AMD ROCm 的深度学习库)
+# -----------------------------------------------------------
+FILE(GLOB miopen_h "miopen/*.h")                 # MIOpen 头文件
+FILE(GLOB miopen_cpp "miopen/*.cpp")             # MIOpen C++ 实现
+
+# -----------------------------------------------------------
+# CPU 加速库
+# -----------------------------------------------------------
+# Intel MKL (数学核心库)
 FILE(GLOB mkl_cpp "mkl/*.cpp")
+
+# Intel oneDNN (原MKLDNN，深度神经网络库)
 FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
+# -----------------------------------------------------------
+# 原生操作实现 (按后端分类)
+# -----------------------------------------------------------
+# 通用原生操作
 FILE(GLOB native_cpp "native/*.cpp")
-FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
-FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
-FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
-FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
-FILE(GLOB native_cuda_cu "native/cuda/*.cu")
-FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
-FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
-FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
+
+# 稀疏张量操作
+FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")              # CPU 稀疏操作
+FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")      # CUDA 稀疏内核
+FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")    # CUDA 稀疏包装
+
+# 各加速库的原生实现
+FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")    # cuDNN 封装实现
+FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")  # MIOpen 封装实现
+FILE(GLOB native_cuda_cu "native/cuda/*.cu")        # CUDA 内核实现
+FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")      # CUDA 包装实现
+FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")        # MKL 封装实现
+FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")  # oneDNN 封装实现
 
 set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
@@ -389,13 +435,35 @@ else()
 endif()
 
 # Pass source, includes, and libs to parent
+# 将当前作用域的变量值提升到父作用域
+# 这样父作用域的CMake脚本可以使用这些变量值
+
+# 核心源文件列表（跨平台基础代码）
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
+
+# CPU特定源文件列表（仅CPU后端的实现）
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
-set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+
+# CUDA特定源文件列表（GPU加速的实现）
+set(ATen_CUDA_SRCS ${Atn_CUDA_SRCS} PARENT_SCOPE)
+
+# CPU测试源文件列表（CPU后端的测试代码）
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
+
+# CUDA测试源文件列表（GPU后端的测试代码）
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+
+# CPU头文件包含路径（CPU后端的头文件目录）
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
+
+# 第三方库包含路径（依赖的第三方库头文件目录）
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
+
+# CUDA头文件包含路径（CUDA相关的头文件目录）
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
+
+# CPU依赖库列表（CPU后端需要链接的库）
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
+
+# CUDA依赖库列表（CUDA后端需要链接的库）
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)

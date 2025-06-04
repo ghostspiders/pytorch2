@@ -2,9 +2,7 @@
 #include "ATen/Config.h"
 #include "ATen/core/Half.h"
 
-// Defines the accumulation type for a scalar type.
-// Example:
-//   using accscalar_t = acc_type<scalar_t, true>;
+// 这段代码实现了一个‌累加类型选择器‌（AccumulateType），用于在数值计算中根据输入类型（T）和设备环境（CPU/CUDA）自动选择最优的累加类型，以平衡精度与性能
 
 #if defined(__CUDACC__)
 #include <cuda.h>
