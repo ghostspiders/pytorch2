@@ -1,17 +1,16 @@
-#include "ATen/Config.h"
-#include "ATen/TensorUtils.h"
-
-#include "ATen/ATen.h"
+#include "ATen/Config.h"        // ATen配置头文件
+#include "ATen/TensorUtils.h"   // 张量工具函数
+#include "ATen/ATen.h"          // ATen核心功能
 
 #include <ostream>
 #include <sstream>
 
 namespace at {
 
+// 张量几何参数输出运算符重载
 std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   if (t.pos == 0) {
-    // 0 is distinguished; it usually indicates 'self' or the return
-    // tensor
+    // 位置0有特殊含义，通常表示'self'或返回张量
     out << "'" << t.name << "'";
   } else {
     out << "argument #" << t.pos << " '" << t.name << "'";
@@ -19,12 +18,16 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   return out;
 }
 
+/******************** 张量维度检查函数 ********************/
+
+// 检查张量维度是否等于指定值
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
   AT_CHECK(t->dim() == dim,
     "Expected ", dim, "-dimensional tensor, but got ", t->dim(),
     "-dimensional tensor for ", t," (while checking arguments for ", c, ")");
 }
 
+// 检查张量维度是否在指定范围内
 void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end) {
   AT_CHECK(
     t->dim() >= dim_start && t->dim() < dim_end,
@@ -33,6 +36,9 @@ void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start,
     c, ")");
 }
 
+/******************** 张量连续性检查函数 ********************/
+
+// 检查单个张量是否连续存储
 void checkContiguous(CheckedFrom c, const TensorGeometryArg& t) {
   AT_CHECK(
     t->is_contiguous(),
@@ -40,21 +46,26 @@ void checkContiguous(CheckedFrom c, const TensorGeometryArg& t) {
      " (while checking arguments for ", c, ")");
 }
 
+// 检查多个张量是否都连续存储
 void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
   for (auto& t : ts) {
-    if (!t->defined()) continue;
+    if (!t->defined()) continue;  // 跳过未定义的张量
     checkContiguous(c, t);
   }
 }
 
+/******************** 张量大小检查函数 ********************/
+
+// 检查张量大小是否匹配指定值
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, sizes.size());  // 先检查维度是否匹配
   AT_CHECK(
     t->sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
     " for ", t, " (while checking arguments for ", c, ")");
 }
 
+// 检查指定维度的大小是否匹配
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size) {
   AT_CHECK(
     t->size(dim) == size,
@@ -63,18 +74,23 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t s
     " (while checking arguments for ", c, ")");
 }
 
-void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
-  const TensorArg* t0 = nullptr;
+/******************** 张量一致性检查函数 ********************/
+
+// 通用检查函数，验证一组张量是否满足特定条件
+void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, 
+                 void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
+  const TensorArg* t0 = nullptr;  // 第一个有效张量作为基准
   for (auto& t : tensors) {
-    if (!t->defined()) continue;
+    if (!t->defined()) continue;  // 跳过未定义的张量
     if (t0 != nullptr) {
-      fn(c, *t0, t);
+      fn(c, *t0, t);  // 与基准张量比较
     } else {
-      t0 = &t;
+      t0 = &t;  // 设置基准张量
     }
   }
 }
 
+// 检查两个张量大小是否相同
 void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   AT_CHECK(
     t1->sizes().equals(t2->sizes()),
@@ -83,10 +99,14 @@ void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查多个张量大小是否相同
 void checkAllSameSize(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameSize);
 }
 
+/******************** 张量元素数量检查函数 ********************/
+
+// 检查张量元素数量是否匹配
 void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel) {
   AT_CHECK(
     t->numel() == numel,
@@ -95,6 +115,7 @@ void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查两个张量元素数量是否相同
 void checkSameNumel(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   AT_CHECK(
     t1->numel() == t2->numel(),
@@ -104,10 +125,14 @@ void checkSameNumel(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查多个张量元素数量是否相同
 void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameNumel);
 }
 
+/******************** GPU相关检查函数 ********************/
+
+// 检查两个张量是否在相同GPU设备上
 void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   if (! (t1->is_cuda()) || ! (t2->is_cuda())) {
     std::ostringstream oss;
@@ -128,10 +153,14 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查多个张量是否在相同GPU设备上
 void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameGPU);
 }
 
+/******************** 类型检查函数 ********************/
+
+// 检查两个张量类型是否相同
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
   AT_CHECK(
     t1->type() == t2->type(),
@@ -140,6 +169,7 @@ void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查张量标量类型是否匹配
 void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
   AT_CHECK(
     t->type().scalarType() == ty,
@@ -148,8 +178,9 @@ void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
     ")");
 }
 
+// 检查张量标量类型是否在允许列表中
 void checkScalarTypes(CheckedFrom c, const TensorArg& t,
-                      at::ArrayRef<ScalarType> l) {
+                     at::ArrayRef<ScalarType> l) {
     if (std::find(l.begin(), l.end(), t->type().scalarType()) == l.end()) {
       std::ostringstream oss;
       oss << "Expected tensor for " << t << " to have one of the following "
@@ -168,10 +199,14 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
     }
 }
 
+// 检查多个张量类型是否相同
 void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameType);
 }
 
+/******************** 其他检查函数 ********************/
+
+// 检查两个张量维度是否相同
 void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2) {
   AT_CHECK(
     t1->dim() == t2->dim(),
@@ -180,6 +215,7 @@ void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeomet
     " (while checking arguments for ", c, ")");
 }
 
+// 检查张量是否已定义
 void checkDefined(CheckedFrom c, const TensorArg& t) {
   AT_CHECK(
     t->defined(),
@@ -187,13 +223,14 @@ void checkDefined(CheckedFrom c, const TensorArg& t) {
     " (while checking arguments for ", c, ")");
 }
 
+// 检查多个张量是否都已定义
 void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
-  // NB: don't filter defined here
   for (auto t : ts) {
     checkDefined(c, t);
   }
 }
 
+// 检查张量后端类型是否匹配
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   AT_CHECK(
     t.type().backend() == backend,
@@ -202,28 +239,33 @@ void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
     "(while checking arguments for ", c, ")");
 }
 
+// 检查多个张量后端类型是否匹配
 void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) {
   for (auto &t : tensors) {
     checkBackend(c, t, backend);
   }
 }
 
+/******************** 工具函数 ********************/
+
+// 安全获取张量数据指针，处理未定义情况
 void * maybe_data_ptr(const Tensor& tensor) {
   return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
 }
 
+// 安全获取张量参数数据指针，处理未定义情况
 void * maybe_data_ptr(const TensorArg& tensor) {
   return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
 }
 
-// See TensorUtils.h on why this is useful now that we cache is_contiguous.
+// 根据大小和步长判断张量是否连续存储
 bool geometry_is_contiguous(IntList sizes, IntList strides) {
   int64_t dim = sizes.size();
   int64_t expected_stride = 1;
   bool contig_if_nonempty = true;
   for (int64_t i = dim - 1; i >= 0; i--) {
     if (sizes[i] == 0) {
-      return true;
+      return true;  // 空张量视为连续
     }
     if (contig_if_nonempty) {
       if (sizes[i] != 1 && strides[i] != expected_stride) {
@@ -235,4 +277,4 @@ bool geometry_is_contiguous(IntList sizes, IntList strides) {
   return contig_if_nonempty;
 }
 
-}
+} // namespace at
