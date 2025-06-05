@@ -1,4 +1,4 @@
-#pragma once
+#pragma once  // 防止头文件重复包含
 
 #include <cstddef>
 #include <sstream>
@@ -6,81 +6,79 @@
 #include <typeinfo>
 #include <vector>
 
-#include <c10/util/intrusive_ptr.h>
-#include <c10/util/typeid.h>
-#include <c10/macros/Macros.h>
+#include <c10/util/intrusive_ptr.h>  // 引用智能指针工具
+#include <c10/util/typeid.h>         // 类型ID支持
+#include <c10/macros/Macros.h>       // 宏定义
 
-namespace caffe2 {
+namespace caffe2 {  // 命名空间：Caffe2（PyTorch的前身）
 
-class Tensor;
+class Tensor;  // 前向声明Tensor类
 
 /**
- * @brief Blob is a general container that hosts a typed pointer.
+ * @brief Blob是一个通用容器，用于托管类型化的指针
  *
- * A Blob hosts a pointer as well as its type, and takes charge of deleting it
- * properly when the blob is deallocated or re-allocated with a new type. A blob
- * could contain anything, although the most common case is to contain a Tensor.
+ * Blob托管一个指针及其类型信息，并负责在Blob被释放或重新分配时正确删除指针。
+ * 虽然Blob可以包含任何类型，但最常见的是包含Tensor。
  */
-class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
+class CAFFE2_API Blob final : public c10::intrusive_ptr_target {  // 继承自引用计数基类
  public:
   /**
-   * Initializes an empty Blob.
+   * 初始化一个空的Blob
    */
   Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
+  
   ~Blob() {
-    Reset();
+    Reset();  // 析构时自动释放资源
   }
 
+  // 移动构造函数
   Blob(Blob&& other) noexcept : Blob() {
-    swap(other);
+    swap(other);  // 通过swap实现移动语义
   }
 
+  // 移动赋值运算符
   Blob& operator=(Blob&& other) noexcept {
     Blob(std::move(other)).swap(*this);
     return *this;
   }
 
   /**
-   * Checks if the content stored in the blob is of type T.
+   * 检查Blob中存储的内容是否为类型T
    */
   template <class T>
   bool IsType() const noexcept {
-    return meta_.Match<T>();
+    return meta_.Match<T>();  // 使用TypeMeta进行类型匹配
   }
 
   /**
-   * Returns the meta info of the blob.
+   * 返回Blob的类型元信息
    */
   inline const TypeMeta& meta() const noexcept {
     return meta_;
   }
 
   /**
-   * Returns a printable typename of the blob.
+   * 返回Blob类型的可打印名称
    */
   inline const char* TypeName() const noexcept {
-    return meta_.name();
+    return meta_.name();  // 获取类型名称
   }
 
   /**
-   * @brief Gets the const reference of the stored object. The code checks if
-   * the stored object is of the desired type.
+   * @brief 获取存储对象的常量引用。代码会检查存储对象是否为所需类型。
    */
-  // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
-    AT_ASSERTM(
+    AT_ASSERTM(  // 类型检查断言
         IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
         " while caller expects ",
         TypeMeta::TypeName<T>());
-    // TODO: after we add Get<Tensor>(DeviceType)
-    // and changed all the callsites, we can add
-    // a static assert here to enforce T != Tensor
-    return *static_cast<const T*>(pointer_);
+    return *static_cast<const T*>(pointer_);  // 类型转换后返回
   }
 
+  // 获取原始指针（无类型检查）
   const void* GetRaw() const noexcept {
     return pointer_;
   }
@@ -89,28 +87,24 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   }
 
   /**
-   * @brief Gets a mutable pointer to the stored object.
+   * @brief 获取存储对象的可变指针
    *
-   * If the current object is not of the right type, a new object is created
-   * and the old object is freed. Note that type T should have a default
-   * constructor. Otherwise, create the object yourself first, and use
-   * Reset().
+   * 如果当前对象不是正确类型，会创建新对象并释放旧对象。
+   * 注意：类型T必须有默认构造函数。
    */
   template <class T>
   T* GetMutable() {
-    static_assert(
+    static_assert(  // 编译期检查是否可默认构造
         std::is_default_constructible<T>::value,
-        "GetMutable can't be called with non-default-constructible types. "
-        "Try using specialized methods");
+        "GetMutable can't be called with non-default-constructible types");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {
-      // TODO Re-enable logging
-      // VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<T>();
-      return Reset<T>(new T());
+      return Reset<T>(new T());  // 类型不匹配时重建对象
     }
   }
 
+  // 安全版GetMutable，失败返回nullptr
   template <class T>
   T* GetMutableOrNull() {
     if (IsType<T>()) {
@@ -121,31 +115,19 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Sets the underlying object to the allocated one. The Blob then takes over
-   * the ownership of the passed in pointer. If there is already an object in
-   * the Blob, the old object is freed.
-   *
-   * This is used when the underlying class T does not have a default ctor, or
-   * complex initializations needs to be done outside the blob.
+   * 重置Blob内容为指定指针（接管所有权）
    */
   template <class T>
   T* Reset(T* allocated) {
-    free_();
-    meta_ = TypeMeta::Make<T>();
+    free_();  // 先释放旧资源
+    meta_ = TypeMeta::Make<T>();  // 更新类型信息
     pointer_ = static_cast<void*>(allocated);
-    has_ownership_ = true;
+    has_ownership_ = true;  // 标记所有权
     return allocated;
   }
 
   /**
-   * Sets the underlying object to the allocated one, but does not take over
-   * the ownership of the passed in pointer. If there is already an object in
-   * the Blob, the old object is freed.
-   *
-   * Unlike Reset, this does not take over the ownership of the pointer and the
-   * caller is responsible for making sure that the lifetime of the allocated
-   * blob outlasts the lifetime of any access to this blob, until another Reset
-   * call is made or the blob is destructed.
+   * 共享外部指针（不接管所有权）
    */
   template <class T>
   typename std::remove_const<T>::type* ShareExternal(
@@ -155,16 +137,17 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
+  // 共享外部指针的底层实现
   void* ShareExternal(void* allocated, const TypeMeta& meta) {
     free_();
     meta_ = meta;
     pointer_ = static_cast<void*>(allocated);
-    has_ownership_ = false;
+    has_ownership_ = false;  // 明确不拥有所有权
     return allocated;
   }
 
   /**
-   * Resets the Blob to an empty one.
+   * 重置Blob为空状态
    */
   inline void Reset() {
     free_();
@@ -174,7 +157,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   }
 
   /**
-   * @brief Swaps the underlying storage of two blobs.
+   * @brief 交换两个Blob的底层存储
    */
   void swap(Blob& rhs) {
     using std::swap;
@@ -184,26 +167,29 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   }
 
  private:
+  // 释放资源（仅当拥有所有权时）
   void free_() {
     if (has_ownership_) {
       AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
-      (*meta_.deleteFn())(pointer_);
+      (*meta_.deleteFn())(pointer_);  // 调用类型特定的删除器
     }
   }
 
-  TypeMeta meta_;
-  void* pointer_ = nullptr;
-  bool has_ownership_ = false;
+  TypeMeta meta_;         // 类型元信息
+  void* pointer_ = nullptr;  // 存储的指针
+  bool has_ownership_ = false;  // 所有权标志
 
-  C10_DISABLE_COPY_AND_ASSIGN(Blob);
+  C10_DISABLE_COPY_AND_ASSIGN(Blob);  // 禁用拷贝构造和赋值
 };
 
+// 全局swap函数重载
 inline void swap(Blob& lhs, Blob& rhs) {
   lhs.swap(rhs);
 }
 
+// 输出运算符重载
 inline std::ostream& operator<<(std::ostream& out, const Blob& v) {
-  return out << "Blob[" << v.TypeName() << "]";
+  return out << "Blob[" << v.TypeName() << "]";  // 输出类型名称
 }
 
 } // namespace caffe2

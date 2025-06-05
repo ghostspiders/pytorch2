@@ -1,279 +1,230 @@
-#include "ATen/core/Formatting.h"
-
-#include <cmath>
-#include <cstdint>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include <tuple>
+#include "ATen/core/Formatting.h"  // 格式化输出相关头文件
+#include <cmath>                  // 数学函数
+#include <cstdint>               // 标准整数类型
+#include <iomanip>               // IO流格式控制
+#include <iostream>              // 标准输入输出
+#include <sstream>               // 字符串流
+#include <tuple>                 // 多元组
 
 namespace c10 {
+// Backend类型的输出运算符重载
 std::ostream& operator<<(std::ostream & out, Backend b) {
-  return out << toString(b);
+  return out << toString(b);  // 调用toString转换为字符串输出
 }
-}
+} // namespace c10
+
 namespace at {
 
-//not all C++ compilers have default float so we define our own here
+// 自定义defaultfloat实现(兼容非标准C++编译器)
 inline std::ios_base& defaultfloat(std::ios_base& __base) {
-  __base.unsetf(std::ios_base::floatfield);
+  __base.unsetf(std::ios_base::floatfield);  // 清除浮点格式标志
   return __base;
 }
-//saves/restores number formatting inside scope
+
+// RAII格式保护器(进入作用域保存格式，离开恢复格式)
 struct FormatGuard {
-  FormatGuard(std::ostream & out)
-  : out(out), saved(nullptr) {
-    saved.copyfmt(out);
+  FormatGuard(std::ostream & out) : out(out), saved(nullptr) {
+    saved.copyfmt(out);  // 保存当前格式
   }
   ~FormatGuard() {
-    out.copyfmt(saved);
+    out.copyfmt(saved);  // 恢复保存的格式
   }
 private:
-  std::ostream & out;
-  std::ios saved;
+  std::ostream & out;  // 输出流引用
+  std::ios saved;     // 保存的格式状态
 };
 
+// Type类型的输出运算符重载
 std::ostream& operator<<(std::ostream & out, const Type& t) {
-  return out << t.toString();
+  return out << t.toString();  // 调用类型的toString方法
 }
 
+// 内部函数: 确定张量的最佳打印格式
 static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Tensor& self) {
   auto size = self.numel();
   if(size == 0) {
-    return std::make_tuple(1., 0);
+    return std::make_tuple(1., 0);  // 空张量默认格式
   }
+
+  // 检查是否为整数模式
   bool intMode = true;
   auto self_p = self.data<double>();
   for(int64_t i = 0; i < size; i++) {
     auto z = self_p[i];
-    if(std::isfinite(z)) {
-      if(z != std::ceil(z)) {
-        intMode = false;
-        break;
-      }
-    }
-  }
-  int64_t offset = 0;
-  while(!std::isfinite(self_p[offset])) {
-    offset = offset + 1;
-    if(offset == size) {
+    if(std::isfinite(z) && z != std::ceil(z)) {
+      intMode = false;
       break;
     }
   }
-  double expMin;
-  double expMax;
-  if(offset == size) {
-    expMin = 1;
-    expMax = 1;
-  } else {
-    expMin = fabs(self_p[offset]);
-    expMax = fabs(self_p[offset]);
+
+  // 找到第一个有限值作为基准
+  int64_t offset = 0;
+  while(offset < size && !std::isfinite(self_p[offset])) {
+    offset++;
+  }
+
+  // 计算数值范围
+  double expMin = 1, expMax = 1;
+  if(offset < size) {
+    expMin = expMax = fabs(self_p[offset]);
     for(int64_t i = offset; i < size; i++) {
       double z = fabs(self_p[i]);
       if(std::isfinite(z)) {
-        if(z < expMin) {
-          expMin = z;
-        }
-        if(self_p[i] > expMax) {
-          expMax = z;
-        }
+        expMin = std::min(expMin, z);
+        expMax = std::max(expMax, z);
       }
     }
-    if(expMin != 0) {
-      expMin = std::floor(std::log10(expMin)) + 1;
-    } else {
-      expMin = 1;
-    }
-    if(expMax != 0) {
-      expMax = std::floor(std::log10(expMax)) + 1;
-    } else {
-      expMax = 1;
-    }
+    // 计算10的幂次范围
+    expMin = (expMin != 0) ? std::floor(std::log10(expMin)) + 1 : 1;
+    expMax = (expMax != 0) ? std::floor(std::log10(expMax)) + 1 : 1;
   }
+
+  // 确定输出格式和缩放因子
   double scale = 1;
   int64_t sz;
   if(intMode) {
-    if(expMax > 9) {
-      sz = 11;
-      stream << std::scientific << std::setprecision(4);
-    } else {
-      sz = expMax + 1;
-      stream << defaultfloat;
-    }
+    sz = (expMax > 9) ? 11 : expMax + 1;
+    stream << ((expMax > 9) ? std::scientific : defaultfloat);
   } else {
-    if(expMax-expMin > 4) {
-      sz = 11;
-      if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
-        sz = sz + 1;
-      }
-      stream << std::scientific << std::setprecision(4);
-    } else {
-      if(expMax > 5 || expMax < 0) {
-        sz = 7;
-        scale = std::pow(10, expMax-1);
-        stream << std::fixed << std::setprecision(4);
-      } else {
-        if(expMax == 0) {
-          sz = 7;
-        } else {
-          sz = expMax+6;
-        }
-        stream << std::fixed << std::setprecision(4);
-      }
+    if(expMax-expMin > 4) {  // 大动态范围使用科学计数法
+      sz = 11 + (std::fabs(expMax) > 99 || std::fabs(expMin) > 99);
+      stream << std::scientific;
+    } else {  // 小范围使用固定小数
+      sz = (expMax > 5 || expMax < 0) ? 7 : (expMax == 0) ? 7 : expMax+6;
+      scale = (expMax > 5 || expMax < 0) ? std::pow(10, expMax-1) : 1;
+      stream << std::fixed;
     }
+    stream << std::setprecision(4);  // 统一4位精度
   }
   return std::make_tuple(scale, sz);
 }
 
-static void __printIndent(std::ostream &stream, int64_t indent)
-{
-  for(int64_t i = 0; i < indent; i++) {
-    stream << " ";
-  }
+// 打印缩进
+static void __printIndent(std::ostream &stream, int64_t indent) {
+  stream << std::string(indent, ' '); 
 }
 
+// 打印缩放因子
 static void printScale(std::ostream & stream, double scale) {
-  FormatGuard guard(stream);
+  FormatGuard guard(stream);  // 保护格式状态
   stream << defaultfloat << scale << " *" << std::endl;
 }
-static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
-{
-  double scale;
-  int64_t sz;
+
+// 打印矩阵(2D张量)
+static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent) {
+  double scale; int64_t sz;
   std::tie(scale, sz) = __printFormat(stream, self);
 
   __printIndent(stream, indent);
-  int64_t nColumnPerLine = (linesize-indent)/(sz+1);
-  int64_t firstColumn = 0;
-  int64_t lastColumn = -1;
-  while(firstColumn < self.size(1)) {
-    if(firstColumn + nColumnPerLine <= self.size(1)) {
-      lastColumn = firstColumn + nColumnPerLine - 1;
-    } else {
-      lastColumn = self.size(1) - 1;
-    }
-    if(nColumnPerLine < self.size(1)) {
-      if(firstColumn != 0) {
-        stream << std::endl;
-      }
-      stream << "Columns " << firstColumn+1 << " to " << lastColumn+1;
+  int64_t nColumnPerLine = (linesize-indent)/(sz+1);  // 计算每行列数
+  
+  // 分块打印列
+  for(int64_t firstCol = 0; firstCol < self.size(1); ) {
+    int64_t lastCol = std::min(firstCol + nColumnPerLine - 1, self.size(1)-1);
+    
+    if(nColumnPerLine < self.size(1)) {  // 多列需要分块
+      if(firstCol != 0) stream << std::endl;
+      stream << "Columns " << firstCol+1 << " to " << lastCol+1 << std::endl;
       __printIndent(stream, indent);
     }
-    if(scale != 1) {
-      printScale(stream,scale);
+    
+    if(scale != 1) {  // 打印缩放因子
+      printScale(stream, scale);
       __printIndent(stream, indent);
     }
-    for(int64_t l = 0; l < self.size(0); l++) {
-      Tensor row = self.select(0,l);
-      double *row_ptr = row.data<double>();
-      for(int64_t c = firstColumn; c < lastColumn+1; c++) {
-        stream << std::setw(sz) << row_ptr[c]/scale;
-        if(c == lastColumn) {
-          stream << std::endl;
-          if(l != self.size(0)-1) {
-            if(scale != 1) {
-              __printIndent(stream, indent);
-              stream << " ";
-            } else {
-              __printIndent(stream, indent);
-            }
-          }
-        } else {
-          stream << " ";
-        }
+    
+    // 逐行打印
+    for(int64_t row = 0; row < self.size(0); row++) {
+      double *row_ptr = self.select(0,row).data<double>();
+      for(int64_t col = firstCol; col <= lastCol; col++) {
+        stream << std::setw(sz) << row_ptr[col]/scale 
+               << ((col == lastCol) ? "\n" : " ");
+      }
+      if(row != self.size(0)-1) {
+        __printIndent(stream, (scale != 1) ? indent+1 : indent);
       }
     }
-    firstColumn = lastColumn + 1;
+    firstCol = lastCol + 1;
   }
 }
 
-void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
-{
-  std::vector<int64_t> counter(self.ndimension()-2);
-  bool start = true;
-  bool finished = false;
-  counter[0] = -1;
-  for(size_t i = 1; i < counter.size(); i++)
-    counter[i] = 0;
+// 打印高维张量(递归处理)
+static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize) {
+  std::vector<int64_t> counter(self.ndimension()-2, 0);
+  counter[0] = -1;  // 初始化计数器
+  
   while(true) {
-    for(int64_t i = 0; self.ndimension()-2; i++) {
-      counter[i] = counter[i] + 1;
-      if(counter[i] >= self.size(i)) {
-        if(i == self.ndimension()-3) {
-          finished = true;
-          break;
-        }
+    // 更新多维计数器
+    for(int64_t i = 0; i < self.ndimension()-2; i++) {
+      if(++counter[i] >= self.size(i)) {
+        if(i == self.ndimension()-3) return;  // 遍历完成
         counter[i] = 0;
-      } else {
-        break;
-      }
+      } else break;
     }
-    if(finished) {
-      break;
+    
+    // 打印子张量标题
+    stream << "\n(";
+    Tensor subtensor = self;
+    for(auto dim : counter) {
+      subtensor = subtensor.select(0, dim);
+      stream << dim+1 << ",";
     }
-    if(start) {
-      start = false;
-    } else {
-      stream << std::endl;
-    }
-    stream << "(";
-    Tensor tensor = self;
-    for(int64_t i=0; i < self.ndimension()-2; i++) {
-      tensor = tensor.select(0, counter[i]);
-      stream << counter[i]+1 << ",";
-    }
-    stream << ".,.) = " << std::endl;
-    __printMatrix(stream, tensor, linesize, 1);
+    stream << ".,.) =\n";
+    
+    // 打印矩阵块
+    __printMatrix(stream, subtensor, linesize, 1);
   }
 }
 
+// 主打印函数(根据张量维度分派)
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
-  FormatGuard guard(stream);
+  FormatGuard guard(stream);  // 自动格式保护
+  
   if(!tensor_.defined()) {
     stream << "[ Tensor (undefined) ]";
-  } else if (tensor_.is_sparse()) {
-    stream << "[ " << tensor_.toString() << "{}\n";
-    stream << "indices:\n" << tensor_._indices() << "\n";
-    stream << "values:\n" << tensor_._values() << "\n";
-    stream << "size:\n" << tensor_.sizes() << "\n";
-    stream << "]";
+  } else if (tensor_.is_sparse()) {  // 稀疏张量特殊处理
+    stream << "[ " << tensor_.toString() << "{}\n"
+           << "indices:\n" << tensor_._indices() << "\n"
+           << "values:\n" << tensor_._values() << "\n"
+           << "size:\n" << tensor_.sizes() << "\n]";
   } else {
-    Type& cpudouble = tensor_.type().toBackend(Backend::CPU).toScalarType(kDouble);
-    Tensor tensor = tensor_.toType(cpudouble).contiguous();
-    if(tensor.ndimension() == 0) {
-      stream << defaultfloat << tensor.data<double>()[0] << std::endl;
-      stream << "[ " << tensor_.toString() << "{} ]";
-    } else if(tensor.ndimension() == 1) {
-      if (tensor.numel() > 0) {
-        double scale;
-        int64_t sz;
-        std::tie(scale, sz) =  __printFormat(stream, tensor);
-        if(scale != 1) {
-          printScale(stream, scale);
+    // 转换为CPU双精度连续张量
+    Tensor tensor = tensor_.toType(
+      tensor_.type().toBackend(Backend::CPU).toScalarType(kDouble)
+    ).contiguous();
+    
+    // 按维度处理
+    switch(tensor.ndimension()) {
+      case 0:  // 标量
+        stream << defaultfloat << tensor.data<double>()[0] << "\n"
+               << "[ " << tensor_.toString() << "{} ]";
+        break;
+      case 1:  // 向量
+        if(tensor.numel() > 0) {
+          auto [scale, sz] = __printFormat(stream, tensor);
+          if(scale != 1) printScale(stream, scale);
+          double* data = tensor.data<double>();
+          for(int64_t i = 0; i < tensor.size(0); i++)
+            stream << std::setw(sz) << data[i]/scale << "\n";
         }
-        double* tensor_p = tensor.data<double>();
-        for(int64_t i = 0; i < tensor.size(0); i++) {
-          stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
-        }
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "} ]";
-    } else if(tensor.ndimension() == 2) {
-      if (tensor.numel() > 0) {
-        __printMatrix(stream, tensor, linesize, 0);
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
-    } else {
-      if (tensor.numel() > 0) {
-        __printTensor(stream, tensor, linesize);
-      }
-      stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
-      for(int64_t i = 1; i < tensor.ndimension(); i++) {
-        stream << "," << tensor.size(i);
-      }
-      stream << "} ]";
+        stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "} ]";
+        break;
+      case 2:  // 矩阵
+        if(tensor.numel() > 0) 
+          __printMatrix(stream, tensor, linesize, 0);
+        stream << "[ " << tensor_.toString() << "{"
+               << tensor.size(0) << "," << tensor.size(1) << "} ]";
+        break;
+      default:  // 高维张量
+        if(tensor.numel() > 0)
+          __printTensor(stream, tensor, linesize);
+        stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
+        for(int64_t i = 1; i < tensor.ndimension(); i++)
+          stream << "," << tensor.size(i);
+        stream << "} ]";
     }
   }
   return stream;
 }
 
-}
+} // namespace at

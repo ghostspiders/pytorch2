@@ -1,12 +1,19 @@
 #pragma once
 
-// ATen symbols correspond exactly to operators defined in ATen.  Every
-// symbol here corresponds exactly to an ATen operation which is defined
-// in Declarations.yaml; attributes are in one-to-one correspondence with
-// their ATen name.
-//
-// To explicitly use interned strings as symbols in your code, you must add
-// them to this list.
+// 这段注释说明该文件中的符号与 ATen 操作符严格对应。ATen 是 PyTorch 的核心张量运算库，而 Declarations.yaml 中定义了这些操作。
+// 主要要点：
+// 一一映射：每个符号都直接对应 Declarations.yaml 中定义的一个 ATen 操作
+// 属性一致：所有属性名称与 ATen 中的名称完全一致（1:1 对应）
+// 显式声明：如果要在代码中使用这些符号（interned strings），必须在此列表中显式添加
+// 背景说明：
+// Declarations.yaml 是 PyTorch 的核心配置文件，定义了所有张量操作的元数据
+// 该文件通过代码生成系统将 YAML 中的操作映射为可调用的符号
+// 严格的对应关系确保了 ATen 操作的定义和代码中的符号表示保持一致
+// 作用：
+// 这段注释是面向 PyTorch 开发者的说明，强调在修改或扩展核心运算时：
+// 必须保持符号与 ATen 操作的严格同步
+// 新增操作需要在此显式注册
+// 避免直接使用字符串，而是通过符号化的方式引用操作
 
 #if !C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
