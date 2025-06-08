@@ -21,26 +21,12 @@ struct TensorOptions;
 } // namespace at
 
 namespace at {
-// Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
-// has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
-//
-// For example:
-//
-// void func(Tensor a) {
-//   Tensor b = a;
-//   ...
-// }
-//
-// In this example, when we say Tensor b = a, we are creating a new object that points to the
-// same underlying TensorImpl, and bumps its reference count. When b goes out of scope, the
-// destructor decrements the reference count by calling release() on the TensorImpl it points to.
-// The existing constructors, operator overloads, etc. take care to implement the correct semantics.
-//
-// Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
-// special care must be taken to handle this.
+
+// Tensor类是PyTorch中表示多维数组的核心类
 class CAFFE2_API Tensor {
 public:
-  Tensor(){};
+  Tensor(){};  // 默认构造函数，创建一个未定义的tensor
+  // 通过TensorImpl指针构造Tensor
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
     if (impl_.get() == nullptr) {
@@ -48,64 +34,42 @@ public:
     }
   }
 
-  Tensor(const Tensor&) = default;
-  Tensor(Tensor&&) = default;
+  Tensor(const Tensor&) = default;  // 拷贝构造函数
+  Tensor(Tensor&&) = default;      // 移动构造函数
 
+  // 返回tensor的维度数
   int64_t dim() const {
     return impl_->dim();
   }
+  // 返回存储偏移量
   int64_t storage_offset() const {
     return impl_->storage_offset();
   }
 
+  // 获取底层TensorImpl指针(不安全操作)
   TensorImpl * unsafeGetTensorImpl() const {
     return impl_.get();
   }
+  // 释放并返回底层TensorImpl指针(不安全操作)
   TensorImpl * unsafeReleaseTensorImpl() {
     return impl_.release();
   }
+  // 获取共享指针引用
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
     return impl_;
   }
 
+  // 检查tensor是否已定义
   bool defined() const {
     return impl_;
   }
 
+  // 重置tensor
   void reset() {
     impl_.reset();
   }
 
-  // The following overloads are very intruiging.  Consider the following
-  // program:
-  //
-  //    x[1] = 3;
-  //
-  // We would expect that the first entry of x is written to 3.  But how can we
-  // actually achieve this?  x[1] evaluates to a tensor...
-  //
-  // The answer is, using a ref-qualifier.  x[1] is an rvalue, which cannot be
-  // (profitably) assigned to in the traditional sense, so we overload
-  // assignment to mean, "Actually, copy 3 into the tensor data."  This is done
-  // with an rvalue-reference ref-qualified overload (the methods with && at the
-  // end of their type.)
-  //
-  // There's one more fly in the ointment: We also want
-  //
-  //    Tensor x = y;
-  //
-  // to work, and we want it NOT to copy.  So we need a traditional operator=
-  // overload.  But we MUST specify a mutable lvalue ref-qualifier, to
-  // disambiguate the traditional overload from the rvalue-reference
-  // ref-qualified overload.  Otherwise, it will be ambiguous, because
-  // a non ref-qualified method is eligible for all situations.
-
-  // Unfortunately, we have to write these constructors out manually
-  // to work around an MSVC bug:
-  //    error C2580: 'at::Tensor &at::Tensor::operator =(const at::Tensor &) &':
-  //    multiple versions of a defaulted special member functions are not allowed
-  // Tensor& operator=(const Tensor&) & = default;
-  // Tensor& operator=(Tensor&&) & = default;
+  // 赋值运算符重载
   Tensor& operator=(const Tensor& x) & {
     impl_ = x.impl_;
     return *this;
@@ -115,94 +79,109 @@ public:
     return *this;
   }
 
-  Tensor& operator=(Scalar v) &&;
-  Tensor& operator=(const Tensor&) &&;
-  Tensor& operator=(Tensor&&) &&;
+  Tensor& operator=(Scalar v) &&;  // 右值赋值(标量)
+  Tensor& operator=(const Tensor&) &&;  // 右值赋值(tensor)
+  Tensor& operator=(Tensor&&) &&;  // 右值移动赋值
 
+  // 检查是否指向同一个tensor
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
   }
+  // 获取引用计数
   size_t use_count() const noexcept {
     return impl_.use_count();
   }
+  // 获取弱引用计数
   size_t weak_use_count() const noexcept {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  const char * toString() const;  // 转换为字符串表示
 
+  // 获取维度大小数组
   IntList sizes() const {
     return impl_->sizes();
   }
+  // 获取步长数组
   IntList strides() const {
     return impl_->strides();
   }
+  // 获取维度数(同dim())
   int64_t ndimension() const {
     return dim();
   }
+  // 检查是否是连续存储
   bool is_contiguous() const {
     return impl_->is_contiguous();
   }
+  // 获取类型信息
   Type & type() const {
     return legacyTensorType(*impl_);
   }
+  // 获取类型ID
   TensorTypeId type_id() const {
     return impl_->type_id();
   }
+  // 获取标量类型
   ScalarType scalar_type() const {
     return typeMetaToScalarType(impl_->dtype());
   }
+  // 获取底层存储
   const Storage& storage() const {
     return impl_->storage();
   }
+  // 检查是否与其他tensor共享存储
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
+  // 类型转换
   Tensor toType(const Type & t, bool non_blocking=false) const;
+  // 拷贝数据
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  // 标量类型转换
   Tensor toType(ScalarType t) const;
+  // 后端转换
   Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
-  /// Defined in Type.h because of include order issues.
+  /// 检查是否是autograd变量
   bool is_variable() const noexcept;
 
-  /// Returns a `Tensor`'s layout. Defined in Type.h
+  /// 获取布局类型
   Layout layout() const noexcept;
 
-  /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.h
+  /// 获取数据类型(TypeMeta)
   caffe2::TypeMeta dtype() const noexcept;
 
-  /// Returns a `Tensor`'s device.
+  /// 获取设备信息
   Device device() const;
 
-  /// Returns a `Tensor`'s device index.
+  /// 获取设备索引
   int64_t get_device() const;
 
-  /// Returns if a `Tensor` has CUDA backend.
+  /// 检查是否是CUDA后端
   bool is_cuda() const;
 
-  /// Returns if a `Tensor` has HIP backend.
+  /// 检查是否是HIP后端
   bool is_hip() const;
 
-  /// Returns if a `Tensor` has sparse backend.
+  /// 检查是否是稀疏张量
   bool is_sparse() const;
 
-  /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
-  /// TensorOptions.h.
+  /// 获取Tensor选项
   TensorOptions options() const;
 
+  // 获取数据指针(模板方法)
   template<typename T>
   T * data() const;
 
+  // 获取标量值(模板方法)
   template <typename T>
   T item() const;
 
-  // Purposely not defined here to avoid inlining
+  // 打印张量(不内联定义)
   void print() const;
 
-  // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
-  // dimension.
+  // 返回CPU张量的访问器(指定类型和维度)
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
@@ -210,13 +189,9 @@ public:
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() && = delete;
+  TensorAccessor<T,N> accessor() && = delete;  // 禁止右值调用
 
-  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
-  // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
-  // cast the data pointer to a __restrict__ pointer.
-  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
-  // as an argument.
+  // 返回CUDA张量的打包访问器(指定类型、维度和指针特性)
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
@@ -224,7 +199,8 @@ public:
     return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+  PackedTensorAccessor<T,N> packed_accessor() && = delete;  // 禁止右值调用
+};
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -674,62 +650,100 @@ public:
   // Before that change, we make this method to maintain BC for C++ usage like
   // `x.to(y.dtype)`.
   // TODO: remove following two after at::kDouble and its friends are TypeMeta's.
-  inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+  // 将张量转换为指定数据类型(TypeMeta版本)
+inline Tensor to(caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    // 调用ScalarType版本的to方法，将TypeMeta转换为对应的ScalarType
     return this->to(/*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
-  }
-  inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+}
+
+// 将张量转换为指定设备和数据类型(TypeMeta版本)  
+inline Tensor to(Device device, caffe2::TypeMeta type_meta, bool non_blocking=false, bool copy=false) const {
+    // 调用ScalarType版本的to方法，将TypeMeta转换为对应的ScalarType
     return this->to(device, /*scalar_type=*/typeMetaToScalarType(type_meta), non_blocking, copy);
-  }
+}
 
-  template <typename F, typename... Args>
-  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+/**
+ * 通用成员函数调用方法
+ * @tparam F 函数类型
+ * @tparam Args 参数类型
+ * @param func 要调用的函数
+ * @param params 函数参数
+ * @return 函数调用结果
+ * 
+ * 允许以统一方式调用成员函数，主要用于实现方法链式调用
+ */
+template <typename F, typename... Args>
+auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
-  }
+}
 
-  friend struct WeakTensor;
+// 声明WeakTensor为友元类，允许访问Tensor的私有成员
+friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
-};
+    // Tensor的核心实现，使用引用计数的智能指针管理TensorImpl
+    c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 
+/**
+ * WeakTensor类 - Tensor的弱引用版本
+ * 用于避免循环引用导致的内存泄漏
+ */
 struct CAFFE2_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
+    // 从Tensor构造WeakTensor
+    WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
-  // XXX: this can return undefined tensors
-  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
-  Tensor lock() const {
-    return Tensor(weak_impl_.lock());
-  }
+    /**
+     * 尝试将弱引用提升为强引用
+     * @return 如果原始Tensor还存在则返回对应的Tensor，否则返回未定义的Tensor
+     * 注意：可能返回未定义的Tensor，理想情况下应该返回c10::optional<Tensor>
+     */
+    Tensor lock() const {
+        return Tensor(weak_impl_.lock());
+    }
 
-  bool is_same(const WeakTensor& other) const noexcept {
-    return weak_impl_ == other.weak_impl_;
-  }
+    // 检查是否指向同一个Tensor
+    bool is_same(const WeakTensor& other) const noexcept {
+        return weak_impl_ == other.weak_impl_;
+    }
 
-  size_t use_count() const noexcept {
-    return weak_impl_.use_count();
-  }
-  size_t weak_use_count() const noexcept {
-    return weak_impl_.weak_use_count();
-  }
+    // 获取强引用计数
+    size_t use_count() const noexcept {
+        return weak_impl_.use_count();
+    }
+    
+    // 获取弱引用计数  
+    size_t weak_use_count() const noexcept {
+        return weak_impl_.weak_use_count();
+    }
 
-  TensorImpl* unsafeGetTensorImpl() const {
-    return weak_impl_._unsafe_get_target();
-  }
+    // 不安全地获取底层TensorImpl指针
+    TensorImpl* unsafeGetTensorImpl() const {
+        return weak_impl_._unsafe_get_target();
+    }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
+    // 使用弱引用指针管理TensorImpl
+    c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 
+// 细节命名空间，包含内部使用的辅助功能
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
-// in an intrusive_ptr instead it just converts the argument passed to
-// requested intrusive_ptr type.
+/**
+ * Tensor创建辅助函数
+ * @tparam T TensorImpl的具体类型
+ * @tparam Args 构造参数类型
+ * @param args 构造参数
+ * @return 新创建的Tensor
+ * 
+ * 简化Tensor创建过程，自动将参数转换为所需的intrusive_ptr
+ */
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
-  return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+    return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
 }
 } // namespace detail
 
 } // namespace at
 
+// 包含Tensor方法的具体实现
 #include "ATen/core/TensorMethods.h"
