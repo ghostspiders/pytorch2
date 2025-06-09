@@ -8,79 +8,70 @@
 #include <math.h>
 
 //
-// This file contains pointwise operation functions and kernels that
-// work on both contiguous and non-contiguous tensor arguments of
-// arbitrary (up to MAX_CUTORCH_DIMS) dimensioned arguments without
-// copying or temporary storage.
+// 本文件包含逐点操作函数和内核，
+// 可处理任意维度（最高MAX_CUTORCH_DIMS）的张量参数，
+// 无论内存是否连续，均无需复制或临时存储。
 //
 
 /*
-  NOTE [ CUDA_tensor_applyN helpers ]
+  说明 [ CUDA_tensor_applyN 辅助函数 ]
 
-  The following CUDA_tensor_applyN (where N currently can be 1, 2, 3, or 4)
-  functions apply a pointwise operator to N tensor(s).
+  下列CUDA_tensor_applyN函数（当前N可为1、2、3或4）
+  对N个张量执行逐点操作。
 
-  The calling convention is
+  调用约定：
 
-  1. The template arguments should be, sequentially,
-    - First N typename args specify the scalar types of each of the N tensors.
-    - (Optional) `int step` arg specifies the number of elements processed
-      together at the same time.
-      Default is 1.
-    - A usually omitted (i.e., inferred) typename arg specifies the type of the
-      function/functor applied on `N * step` values  in each iteration of each
-      CUDA thread.
-  2. The arguments should be, sequentially,
-    - N tensors
-    - op: a function/functor that processes `N * step` values at the same time.
-      - If `step == 1`, it must have signature
-        `void(*)(scalar1_t&, scalar2_t&, ..., scalarN_t&)`, where
-        `scalar*_t`s are the first N typename template args, and the inputs
-        are the `N` values from the `N` tensors retrieved at a common index.
-      - Otherwise, it must must have signature
-          void(*)(int n, scalar1_t&, scalar1_t&, ..., scalar1_t&,  // repeat `step` times
-                         scalar2_t&, scalar2_t&, ..., scalar2_t&,  // repeat `step` times
-                         ...,
-                         scalarN_t&, scalarN_t&, ..., scalarN_t&)  // repeat `step` times
-        Different from `step == 1` case, it processes `N * step` values taken
-        from `step` common indices. Moreover, the first input `n` represents the
-        number of valid indices (it will always have `0 < n <= step`). It will
-        almost always be `step`, but at the boundary we may not have full `step`
-        elements and `n` can be a lesser value.
+  1. 模板参数应按顺序指定：
+    - 前N个类型参数指定每个张量的标量类型
+    - （可选）`int step`参数指定每次迭代处理的元素数量
+      默认值为1
+    - （通常可省略的）类型参数指定应用于每次迭代中
+      `N*step`个值的函数/函子类型
 
-        E.g., if `step == 4` and `N == 2`, `op` could be
+  2. 函数参数应按顺序提供：
+    - N个张量
+    - op：处理`N*step`个值的函数/函子
+      - 若`step == 1`，需满足签名：
+        `void(*)(scalar1_t&, scalar2_t&, ..., scalarN_t&)`
+        其中输入为N个张量在相同索引处的值
+      - 否则需满足签名：
+        `void(*)(int n, scalar1_t&, ..., scalar1_t&,  // 重复step次
+                scalar2_t&, ..., scalar2_t&,          // 重复step次
+                ...,
+                scalarN_t&, ..., scalarN_t&)`         // 重复step次
+        此时会处理来自step个连续索引的`N*step`个值。
+        首参数n表示有效元素数（0 < n <= step），
+        边界情况可能不足step个元素。
 
-          [](int n, scalar1_t &u1, scalar1_t &u2, scalar1_t &u3, scalar1_t &u4,
-                    scalar2_t &v1, scalar2_t &v2, scalar2_t &v3, scalar2_t &v4) {
-            // Only process u1, ..., un and v1, ..., vn.
-            // So if `n == 3`, `u4` and `v4` need not to be considered.
+        例如当`step == 4`且`N == 2`时，op可以是：
+          [](int n, scalar1_t &u1, ..., scalar1_t &u4,
+                    scalar2_t &v1, ..., scalar2_t &v4) {
+            // 仅处理前n个u和v元素
+            // 当n==3时，u4/v4无需处理
           }
 
-      In both cases, the references can actually be const, but at least one of
-      them should be non-const in order to write the output.
-    - (Optional, but recommended) N TensorArgType args that specify for each
-      tensor whether `op` reads AND writes ] (i.e., TensorArgType::ReadWrite),
-      or only reads (i.e., TensorArgType::ReadOnly).
-      Default is TensorArgType::ReadWrite for first Tensor, and
-                 TensorArgType::ReadOnly  for the rest.
+      两种情况下引用实际可为const，但至少需一个非const引用以写入结果
+    - （可选但推荐）N个TensorArgType参数，指定每个张量是
+      读写（TensorArgType::ReadWrite）还是只读（TensorArgType::ReadOnly）
+      默认为：第一个张量ReadWrite，其余ReadOnly
 
-  E.g.,
+  示例：
 
-  to compute a = b^2 for a and b of same dtype, we can call
-
+  计算a = b²（同数据类型）：
   CUDA_tensor_apply2<scalar, scalar>(
     a, b,
-    [] __device__ (scalar &a_val, const scalar &b_val) { a_val = b_val * b_val; }
+    [] __device__ (scalar &a_val, const scalar &b_val) { 
+      a_val = b_val * b_val; 
+    }
   );
 
-  to work on 2 values at the same time, we can call
-
+  批量处理2个元素：
   CUDA_tensor_apply2<scalar1, scalar2, 2>(
     a, b,
     [] __device__ (int n, scalar1 &a_val1, scalar1 &a_val2,
                           const scalar2 &b_val1, const scalar2 &b_val2) {
-      // call special vectorized op here, or just do elementwise and enjoy unrolling...
-      // if n == 1, only process a_val1 and b_val1
+      // 调用向量化操作，或直接逐元素处理以利用循环展开...
+      // 当n==1时仅需处理a_val1和b_val1
     }
   );
 */
@@ -93,33 +84,32 @@ enum class TensorArgType { ReadWrite, ReadOnly };
 
 namespace {
 
-// Rearrange dimensions for pointwise operations so that strides are in
-// decreasing order as much as possible, so that kernels have better memory
-// access patterns.
-//
-// For example, consider a binary operation on two "transposed" 2-dim tensors:
-//    sizes:          256 512
-//    aInfo->strides:   1 256
-//    bInfo->strides:   1 256
-//
-// Given this, each concurrent memory access inside kernelPointwiseApply2() is
-// exactly 256 elements apart, resulting in poor performance.
-//
-// This function exchanges dimensions so that memory access is contiguous:
-//    sizes:          512 256
-//    aInfo->strides: 256   1
-//    bInfo->strides: 256   1
-//
-// (Actually, it becomes even better because now collapseDims() can turn each
-// input into one contiguous array.)
-//
-// In general, given M (<=4) TensorInfo's with N dimensions, we can view each
-// strides[i] (0 <= i < N) as an M-tuple.  Given each pair i < j, we exchange
-// strides[i] and [j] if
-//    (1) strides[i][k] < strides[j][k] for some k (0 <= k < M)
-//        (exchanging them will benefit input #k), and
-//    (2) strides[i][k] <= strieds[j][k] for all k
-//        (exchanging them will not make any input worse).
+// 为逐点操作重新排列维度，尽可能使步长(strides)呈递减顺序，
+// 从而优化内核的内存访问模式。
+
+// 举例说明：假设有两个转置后的2维张量进行二元运算：
+// 尺寸: 256 512
+// aInfo->步长: 1 256
+// bInfo->步长: 1 256
+
+// 这种情况下，kernelPointwiseApply2()中的每次并发内存访问
+// 都相隔256个元素，导致性能低下。
+
+// 本函数通过交换维度使内存访问连续：
+// 尺寸: 512 256
+// aInfo->步长: 256 1
+// bInfo->步长: 256 1
+
+// （实际效果更好，因为此时collapseDims()能将每个输入
+// 转换为连续内存数组）
+
+// 通用情况：给定M(<=4)个N维TensorInfo结构体，
+// 我们可以将每个strides[i](0 <= i < N)视为M元组。
+// 对于任意i < j这对维度，当满足以下条件时交换strides[i]和[j]：
+// (1) 存在某个k(0 <= k < M)使得strides[i][k] < strides[j][k]
+// （交换将有利于第k个输入的内存访问）
+// (2) 对所有k都有strides[i][k] <= strides[j][k]
+// （交换不会使任何输入的内存访问模式恶化）
 template <typename T1, typename IndexType,
           typename T2 = void, typename T3 = void, typename T4 = void>
 inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,

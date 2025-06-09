@@ -1,71 +1,78 @@
-#pragma once
+#pragma once  // 防止头文件重复包含
 
-#include "ATen/core/ATenGeneral.h"
-#include "ATen/Context.h"
-#include "ATen/cuda/CUDAStream.h"
-#include "ATen/cuda/Exceptions.h"
-#include "c10/cuda/CUDAFunctions.h"
+// ATen核心头文件
+#include "ATen/core/ATenGeneral.h"  // ATen通用定义
+#include "ATen/Context.h"           // ATen上下文
+#include "ATen/cuda/CUDAStream.h"   // CUDA流管理
+#include "ATen/cuda/Exceptions.h"   // CUDA异常处理
+#include "c10/cuda/CUDAFunctions.h" // CUDA基础功能
 
-#include <cstdint>
+// 标准库
+#include <cstdint>  // 标准整数类型
 
-#include "cuda_runtime_api.h"
-#include "cusparse.h"
-#include "cublas_v2.h"
+// CUDA库头文件
+#include "cuda_runtime_api.h"  // CUDA运行时API
+#include "cusparse.h"          // CUDA稀疏矩阵库
+#include "cublas_v2.h"         // CUDA BLAS库(v2)
 
 namespace at {
 namespace cuda {
 
 /*
-A common CUDA interface for ATen.
+ * ATen的统一CUDA接口
+ *
+ * 注意与CUDAHooks的区别：
+ * - CUDAHooks: 用于CPU/CUDA混合编译的运行时分发接口
+ * - CUDAContext: 专用于CUDA编译环境的统一功能接口
+ *
+ * 使用原则：
+ * - 仅在CUDA编译环境中使用的文件应使用CUDAContext
+ * - 需要兼容CPU/CUDA环境的文件使用CUDAHooks
+ *
+ * 本接口不关联具体类，各模块自行管理状态
+ * CUDA上下文全局唯一
+ */
 
-This interface is distinct from CUDAHooks, which defines an interface that links
-to both CPU-only and CUDA builds. That interface is intended for runtime
-dispatch and should be used from files that are included in both CPU-only and
-CUDA builds.
+/* 设备信息相关接口 */
 
-CUDAContext, on the other hand, should be preferred by files only included in
-CUDA builds. It is intended to expose CUDA functionality in a consistent
-manner.
-
-This means there is some overlap between the CUDAContext and CUDAHooks, but
-the choice of which to use is simple: use CUDAContext when in a CUDA-only file,
-use CUDAHooks otherwise.
-
-Note that CUDAContext simply defines an interface with no associated class.
-It is expected that the modules whose functions compose this interface will
-manage their own state. There is only a single CUDA context/state.
-*/
-
-/* Device info */
+// 获取系统中可用GPU数量
 inline int64_t getNumGPUs() {
-    return c10::cuda::device_count();
+    return c10::cuda::device_count();  // 调用c10库的设备计数函数
 }
 
 /**
- * In some situations, you may have compiled with CUDA, but no CUDA
- * device is actually available.  Test for this case using is_available().
+ * 检查CUDA是否可用
+ * 可能编译时支持CUDA但运行时无可用设备
+ * @return bool  true表示有可用CUDA设备
  */
 inline bool is_available() {
     int count;
     cudaError_t err = cudaGetDeviceCount(&count);
-    if (err == cudaErrorInsufficientDriver) {
+    if (err == cudaErrorInsufficientDriver) {  // 驱动不兼容
       return false;
     }
-    return count > 0;
+    return count > 0;  // 有至少一个可用设备
 }
 
+// 获取当前设备属性结构体（包含计算能力等参数）
 CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
 
+// 获取当前设备的warp大小（典型值32）
 CAFFE2_API int warp_size();
 
+// 获取指定设备的属性结构体
 CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
+// 获取CUDA设备内存分配器
 CAFFE2_API Allocator* getCUDADeviceAllocator();
 
-/* Handles */
-CAFFE2_API cusparseHandle_t getCurrentCUDASparseHandle();
-CAFFE2_API cublasHandle_t getCurrentCUDABlasHandle();
+/* CUDA数学库句柄 */
 
+// 获取当前线程的cuSPARSE稀疏矩阵计算句柄
+CAFFE2_API cusparseHandle_t getCurrentCUDASparseHandle();
+
+// 获取当前线程的cuBLAS线性代数计算句柄
+CAFFE2_API cublasHandle_t getCurrentCUDABlasHandle();
 
 } // namespace cuda
 } // namespace at
