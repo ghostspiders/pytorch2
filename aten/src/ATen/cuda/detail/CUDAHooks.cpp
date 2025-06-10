@@ -9,14 +9,14 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 
-#include "THC/THC.h"
+#include "THC/THC.h"  // Torch CUDA库头文件
 #include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
-#include "ATen/cudnn/cudnn-wrapper.h"
+#include "ATen/cudnn/cudnn-wrapper.h"  // cuDNN包装器
 #endif
 
-#include <cuda.h>
+#include <cuda.h>  // CUDA主头文件
 
 #include <cstddef>
 #include <functional>
@@ -26,34 +26,35 @@ namespace at {
 namespace cuda {
 namespace detail {
 
-// NB: deleter is dynamic, because we need it to live in a separate
-// compilation unit (alt is to have another method in hooks, but
-// let's not if we don't need to!)
+// 初始化CUDA状态(THCState)
+// 注意: 删除器是动态的，因为需要它存在于单独的编译单元中
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
-  THCState* thc_state = THCState_alloc();
+  THCState* thc_state = THCState_alloc();  // 分配THC状态
 
-  THCudaInit(thc_state);
+  THCudaInit(thc_state);  // 初始化CUDA状态
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
         if (p)
-          THCState_free(p);
+          THCState_free(p);  // 自定义删除器释放THC状态
       });
 }
 
-std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(
-    Context* context) const {
+// 初始化CUDA随机数生成器
+std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(Context* context) const {
   return std::unique_ptr<Generator>(new CUDAGenerator(context));
 }
 
+// 检查系统是否支持CUDA
 bool CUDAHooks::hasCUDA() const {
   int count;
   cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
+  if (err == cudaErrorInsufficientDriver) {  // 驱动不足
     return false;
   }
   return true;
 }
 
+// 检查是否编译了MAGMA支持
 bool CUDAHooks::hasMAGMA() const {
 #ifdef USE_MAGMA
   return true;
@@ -62,41 +63,47 @@ bool CUDAHooks::hasMAGMA() const {
 #endif
 }
 
+// 检查是否支持cuDNN
 bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+// 获取当前设备索引
 int64_t CUDAHooks::current_device() const {
   int device;
   cudaError_t err = cudaGetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }
-  return -1;
+  return -1;  // 获取失败返回-1
 }
 
+// 获取固定内存分配器
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
 }
 
+// 注册CUDA类型
 void CUDAHooks::registerCUDATypes(Context* context) const {
   register_cuda_types(context);
 }
 
+// 检查是否编译了cuDNN支持
 bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+// 检查是否编译了MIOpen支持(ROCm)
 bool CUDAHooks::compiledWithMIOpen() const {
   return AT_ROCM_ENABLED();
 }
 
+// 检查是否支持带空洞卷积(dilated convolution)
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
   cudaDeviceProp* prop =
       THCState_getCurrentDeviceProperties(globalContext().getTHCState());
-  // NOTE: extra parenthesis around numbers disable clang warnings about
-  // dead code
+  // cuDNN 6.0+ 且计算能力>=5.0，或 cuDNN 6.1+ 支持空洞卷积
   return (
       (CUDNN_VERSION >= (6021)) ||
       (CUDNN_VERSION >= (6000) && prop->major >= 5));
@@ -105,6 +112,7 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #endif
 }
 
+// 获取cuDNN版本
 long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
@@ -113,6 +121,7 @@ long CUDAHooks::versionCuDNN() const {
 #endif
 }
 
+// 获取cuDNN BatchNorm最小epsilon值
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
@@ -122,14 +131,16 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #endif
 }
 
+// 获取cuFFT计划缓存最大大小
 int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
 #ifndef __HIP_PLATFORM_HCC__
   return at::native::detail::cufft_get_plan_cache_max_size_impl();
 #else
-  AT_ERROR("cuFFT with HIP is not supported");
+  AT_ERROR("cuFFT with HIP is not supported");  // HIP不支持cuFFT
 #endif
 }
 
+// 设置cuFFT计划缓存最大大小
 void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
 #ifndef __HIP_PLATFORM_HCC__
   at::native::detail::cufft_set_plan_cache_max_size_impl(max_size);
@@ -138,6 +149,7 @@ void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
 #endif
 }
 
+// 获取cuFFT计划缓存当前大小
 int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
 #ifndef __HIP_PLATFORM_HCC__
   return at::native::detail::cufft_get_plan_cache_size_impl();
@@ -146,6 +158,7 @@ int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
 #endif
 }
 
+// 清空cuFFT计划缓存
 void CUDAHooks::cuFFTClearPlanCache() const {
 #ifndef __HIP_PLATFORM_HCC__
   at::native::detail::cufft_clear_plan_cache_impl();
@@ -154,19 +167,20 @@ void CUDAHooks::cuFFTClearPlanCache() const {
 #endif
 }
 
+// 获取GPU数量
 int CUDAHooks::getNumGPUs() const {
   int count;
   auto err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorNoDevice) {
+  if (err == cudaErrorNoDevice) {  // 没有设备
     return 0;
-  } else if (err != cudaSuccess) {
+  } else if (err != cudaSuccess) {  // 其他错误
     AT_ERROR(
         "CUDA error (", static_cast<int>(err), "): ", cudaGetErrorString(err));
   }
   return count;
 }
 
-// Sigh, the registry doesn't support namespaces :(
+// 注册CUDA钩子
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
 
