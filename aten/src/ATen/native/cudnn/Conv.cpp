@@ -8,8 +8,11 @@
 
 namespace at { namespace native {
 
-// See Note [ATen preprocessor philosophy]
+// 注意：[ATen预处理器哲学] 
+// 此文件提供cuDNN卷积操作的桩函数(stubs)，当编译时未启用cuDNN支持时使用
+// 所有函数都会抛出错误提示，实际实现在启用cuDNN时会覆盖这些桩函数
 
+// cuDNN标准卷积前向传播
 at::Tensor cudnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
@@ -17,6 +20,7 @@ at::Tensor cudnn_convolution(
   AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
+// 输入梯度计算（反向传播）
 at::Tensor cudnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -24,6 +28,7 @@ at::Tensor cudnn_convolution_backward_input(
   AT_ERROR("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
+// 权重梯度计算（反向传播）
 at::Tensor cudnn_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -31,11 +36,13 @@ at::Tensor cudnn_convolution_backward_weight(
   AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
+// 偏置梯度计算（反向传播）
 at::Tensor cudnn_convolution_backward_bias(
     const at::Tensor& grad_output) {
   AT_ERROR("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
 }
 
+// 完整反向传播（输入/权重/偏置梯度）
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -43,6 +50,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
   AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
+// 转置卷积（反卷积）前向传播
 at::Tensor cudnn_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
@@ -50,6 +58,7 @@ at::Tensor cudnn_convolution_transpose(
   AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
+// 转置卷积的输入梯度计算
 at::Tensor cudnn_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
@@ -57,6 +66,7 @@ at::Tensor cudnn_convolution_transpose_backward_input(
   AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
+// 转置卷积的权重梯度计算
 at::Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -64,6 +74,7 @@ at::Tensor cudnn_convolution_transpose_backward_weight(
   AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
+// 转置卷积的完整反向传播
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
@@ -71,60 +82,63 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
   AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
-}}
+}} // namespace at::native
 
 #else  // AT_CUDNN_ENABLED
+// PyTorch 的 CUDA 张量计算库头文件（THC: Torch CUDA）
+#include "THC/THC.h"  
 
-#include "THC/THC.h"
+// cuDNN 封装接口（NVIDIA 深度学习加速库）
+#include <ATen/cudnn/cudnn-wrapper.h>  // cuDNN 版本兼容性封装:ml-citation{ref="3" data="citationList"}
+#include <ATen/cudnn/Descriptors.h>    // 定义 cuDNN 描述符（如卷积张量、滤波器描述）:ml-citation{ref="6" data="citationList"}
+#include <ATen/cudnn/Types.h>          // cuDNN 数据类型和枚举定义:ml-citation{ref="6" data="citationList"}
+#include <ATen/cudnn/Utils.h>          // cuDNN 工具函数（如错误检查、内存管理）:ml-citation{ref="6" data="citationList"}
+#include "ATen/native/utils/ParamsHash.h"  // 参数哈希工具（用于缓存 cuDNN 算法选择）:ml-citation{ref="6" data="citationList"}
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-#include <ATen/cudnn/Descriptors.h>
-#include <ATen/cudnn/Types.h>
-#include <ATen/cudnn/Utils.h>
-#include "ATen/native/utils/ParamsHash.h"
+// PyTorch 张量工具库
+#include <ATen/TensorUtils.h>  // 张量形状计算、内存布局处理等:ml-citation{ref="6" data="citationList"}
 
-#include <ATen/TensorUtils.h>
-
-#include <functional>
-#include <iterator>
-#include <sstream>
-#include <algorithm>
-#include <memory>
-#include <mutex>
-#include <stdint.h>
-#include <unordered_map>
+// C++ 标准库
+#include <functional>  // 函数对象支持（如 std::bind）
+#include <iterator>    // 迭代器相关工具
+#include <sstream>     // 字符串流处理
+#include <algorithm>   // 算法操作（如排序、查找）
+#include <memory>      // 智能指针（如 std::shared_ptr）
+#include <mutex>       // 互斥锁（线程安全控制）:ml-citation{ref="6" data="citationList"}
+#include <stdint.h>    // 标准整数类型定义
+#include <unordered_map>  // 哈希表容器（用于缓存 cuDNN 配置）:ml-citation{ref="6" data="citationList"}
 
 namespace at { namespace native {
 
-// TODO: Go through all the checking code again and make sure
-// we haven't missed anything.
+// TODO: 再次检查所有检查代码，确保没有遗漏。
 
 // ---------------------------------------------------------------------
 //
-// Math
+// 数学计算
 //
 // ---------------------------------------------------------------------
 
-constexpr int input_batch_size_dim = 0;  // also grad_input
-constexpr int input_channels_dim = 1;
-constexpr int output_batch_size_dim = 0;  // also grad_output
-constexpr int output_channels_dim = 1;
-constexpr int weight_output_channels_dim = 0;
-constexpr int weight_input_channels_dim = 1;
+constexpr int input_batch_size_dim = 0;  // 输入的批量大小维度，也是 grad_input 的维度
+constexpr int input_channels_dim = 1;    // 输入的通道维度
+constexpr int output_batch_size_dim = 0; // 输出的批量大小维度，也是 grad_output 的维度
+constexpr int output_channels_dim = 1;   // 输出的通道维度
+constexpr int weight_output_channels_dim = 0; // 权重的输出通道维度
+constexpr int weight_input_channels_dim = 1;  // 权重的输入通道维度
 
-// Often written as 2 + max_dim (extra dims for batch size and channels)
-constexpr int max_dim = 3;
+// 通常写作 2 + max_dim（额外的维度用于批量大小和通道）
+constexpr int max_dim = 3; // 最大空间维度（例如，对于 2D 卷积，空间维度为 2）
 
-// NB: conv_output_size and conv_input_size are not bijections,
-// as conv_output_size loses information; this is why conv_input_size
-// takes an extra output_padding argument to resolve the ambiguity.
+// 注意：conv_output_size 和 conv_input_size 不是双射函数，
+// 因为 conv_output_size 会丢失信息；这就是为什么 conv_input_size
+// 需要一个额外的 output_padding 参数来解决歧义。
 
+// 计算卷积输出的大小
 static std::vector<int64_t> conv_output_size(
     IntList input_size, IntList weight_size,
     IntList padding, IntList stride, IntList dilation, int64_t groups
 ) {
-  // ASSERT(input_size.size() > 2)
-  // ASSERT(input_size.size() == weight_size.size())
+  // 假设 input_size.size() > 2
+  // 假设 input_size.size() == weight_size.size()
   auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
@@ -137,12 +151,13 @@ static std::vector<int64_t> conv_output_size(
   return output_size;
 }
 
+// 计算卷积输入的大小
 std::vector<int64_t> conv_input_size(
     IntList output_size, IntList weight_size,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups
 ) {
-  // ASSERT(output_size.size() > 2)
-  // ASSERT(output_size.size() == weight_size.size())
+  // 假设 output_size.size() > 2
+  // 假设 output_size.size() == weight_size.size()
   auto dim = output_size.size();
   std::vector<int64_t> input_size(dim);
   input_size[0] = output_size[output_batch_size_dim];
@@ -155,6 +170,7 @@ std::vector<int64_t> conv_input_size(
   return input_size;
 }
 
+// 计算卷积权重的大小
 std::vector<int64_t> conv_weight_size(
     IntList input_size, IntList output_size,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups
@@ -171,7 +187,7 @@ std::vector<int64_t> conv_weight_size(
   return weight_size;
 }
 
-// TODO: Move this into the standard library, with a better name?
+// 按组切片张量
 Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   auto group_size = t.size(dim) / groups;
   return t.narrow(dim, group_idx * group_size, group_size);
@@ -179,19 +195,18 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 
 // ---------------------------------------------------------------------
 //
-// Checking
+// 参数检查
 //
 // ---------------------------------------------------------------------
 
-// Note [Legacy CuDNN grouped convolution support]
+// 注意 [Legacy CuDNN 分组卷积支持]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// CuDNN earlier than CuDNN 7 does not directly support group
-// convolution, so we provide support for it by sequentially
-// running a convolution per group  with appropriately
-// adjusted sizes.  https://blog.yani.io/filter-group-tutorial/
-// has a fairly good diagram explaining how it works.
+// 早期的 CuDNN（7 之前的版本）不直接支持分组卷积，
+// 因此我们通过依次运行每个组的卷积来提供支持，同时适当调整大小。
+// https://blog.yani.io/filter-group-tutorial/  
+// 有一个很好的图示，解释了它是如何工作的。
 
-// Used on pad, stride and dilation
+// 用于填充、步长和膨胀
 static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
 {
   AT_CHECK(args.size() <= expected_size,
@@ -211,22 +226,14 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
   }
 }
 
-
-// NOTE [ Convolution checks ]
+// 注意 [卷积检查]
 //
-// NB: For many call sites, it is not strictly necessary to check all of
-// these relationships (for example, for forward convolution, we compute
-// the size of output ourselves, so we don't actually need to check
-// output.  However, writing a single function that does everything
-// means we get to reuse it for both forwards and all backwards
-// variants, even when the set of "real" inputs varies.  The magic of
-// relational computing!
+// 注意：对于许多调用点，严格来说并不需要检查所有这些关系（例如，对于前向卷积，我们自己计算输出的大小，
+// 因此实际上不需要检查输出。然而，编写一个单一函数来完成所有操作意味着我们可以将其重用于前向和所有反向变体，
+// 即使实际的“真实”输入集会有所不同。关系计算的魔力！
 //
-// (There is one downside, which is that it is slightly harder to write
-// error messages which are able to distinguish between real inputs
-// (which the user can change) and computed inputs (which the user can
-// only indirectly affect).  It would be an interesting exercise to
-// come up with a general framework to handle such situations.)
+// （有一个缺点，那就是编写能够区分真实输入（用户可以更改）和计算输入（用户只能间接影响）的错误消息会稍微困难一些。
+// 设计一个通用框架来处理这种情况将是一个有趣的练习。）
 static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
@@ -236,20 +243,19 @@ static void convolution_shape_check(
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
 
-  // Input
+  // 输入
   checkDimRange(c, input, 3, 6 /* exclusive */);
   checkSize(c, input, input_channels_dim, weight->size(1) * groups);
 
-  // Weight
+  // 权重
   checkSameDim(c, input, weight);
 
-  // TODO: check that output->size() matches output_sizes
-  // TODO: check that weight matches output->sizes()
+  // TODO: 检查 output->size() 是否匹配 output_sizes
+  // TODO: 检查 weight 是否匹配 output->sizes()
   checkSameDim(c, input, output);
 }
 
-// This POD struct is used to let us easily compute hashes of the
-// parameters
+// 这个 POD 结构用于让我们轻松计算参数的哈希值
 struct ConvolutionParams
 {
   cudnnDataType_t dataType;
@@ -261,15 +267,14 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
-  // NB: transposed purposely omitted: transposed just swaps
-  // forward and backward, so you can reuse the benchmark entry,
+  // 注意：故意省略了 transposed，因为 transposed 只是交换了前向和反向，
+  // 因此你可以重用基准条目。
 };
 
-// NB: This can't be a constructor, because then ConvolutionParams
-// would not be a POD anymore.
-// TODO: Use TensorGeometry here instead of the entire Tensor, which we
-// don't actually need.  (OTOH: We can always pass in
-// grad_input/grad_output, so this is not very pressing)
+// 注意：这不能是一个构造函数，因为那样 ConvolutionParams
+// 就不再是 POD 了。
+// TODO: 使用 TensorGeometry 而不是整个 Tensor，因为我们实际上并不需要它。
+// （另一方面：我们总是可以传入 grad_input/grad_output，所以这并不非常紧迫）
 void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
@@ -279,6 +284,7 @@ void setConvolutionParams(
   cudnnDataType_t dataType = getCudnnDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
   params->dataType = dataType;
+  //
   // ASSERT(weight.dim() == input.dim())
   for (int i = 0; i != input.dim(); ++i) {
     params->input_size[i] = (int) input.size(i);

@@ -3,31 +3,43 @@
 
 #include "ATen/Config.h"
 
-static const int MIOPEN_DIM_MAX = 4;
+static const int MIOPEN_DIM_MAX = 4; // MIOpen 支持的最大维度
 
 namespace at { namespace native {
 
+// 定义卷积参数结构体
 struct ConvParams {
-  std::vector<int64_t> stride;
-  std::vector<int64_t> padding;
-  std::vector<int64_t> dilation;
-  bool transposed;
-  std::vector<int64_t> output_padding;
-  int groups;
-  bool benchmark;
-  bool deterministic;
-  bool cudnn_enabled;
+  std::vector<int64_t> stride; // 步长
+  std::vector<int64_t> padding; // 填充
+  std::vector<int64_t> dilation; // 膨胀率
+  bool transposed; // 是否转置卷积
+  std::vector<int64_t> output_padding; // 输出填充
+  int groups; // 分组数量
+  bool benchmark; // 是否进行基准测试
+  bool deterministic; // 是否确定性模式
+  bool cudnn_enabled; // 是否启用 CuDNN
 
+  // 判断是否为非单位步长卷积
   bool is_strided() const;
+  // 判断是否为膨胀卷积
   bool is_dilated() const;
+  // 判断是否为填充卷积
   bool is_padded() const;
+  // 判断输出填充是否为负
   bool is_output_padding_neg() const;
+  // 判断输出填充是否过大
   bool is_output_padding_big() const;
+  // 判断填充是否为负
   bool is_padding_neg() const;
+  // 将 1D 参数扩展为 2D
   void view1d_as_2d();
+  // 判断是否使用 CuDNN
   bool use_cudnn(const at::Tensor& input) const;
+  // 判断是否使用 MIOpen
   bool use_miopen(const at::Tensor& input) const;
+  // 判断是否使用 MKLDNN
   bool use_mkldnn(const at::Tensor& input) const;
+  // 判断是否为深度可分离卷积
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 

@@ -9,9 +9,10 @@
 
 #include <vector>
 
-// First the required LAPACK implementations are registered here.
-// A comment above the registered LAPACK routine suggest which batched
-// linear algebra function uses that routine
+// 首先，所需的 LAPACK 实现在此注册。
+// 在已注册的 LAPACK 例程上方的注释说明了
+// 哪个批量线性代数函数使用了该例程
+
 #ifdef USE_LAPACK
 
 // gesv
@@ -105,8 +106,8 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
 }
 #endif
 
-// Below of the definitions of the functions operating on a batch that are going to be dispatched
-// in the main helper functions for the linear algebra operations
+// 下方定义了作用于批数据的函数，这些函数将在
+// 线性代数运算的主要辅助函数中被分派
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ gesv ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
