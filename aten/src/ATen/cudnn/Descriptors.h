@@ -13,33 +13,23 @@
 
 #include <curand_kernel.h>
 
-/*
-Note [cuDNN dropout descriptor initialization]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/*  
+注释 [cuDNN dropout描述符初始化]  
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
 
-In most cases, setting descriptors in cuDNN is cheap (e.g.,
-cudnnSetTensorNdDescriptor).  However, this is not the case for
-cudnnSetDropoutDescriptor: in cuDNN 6/7 (and possibly others) it does an
-expensive precomputation to initialize the random number generator states.  In
-cuDNN 6, this is the ONLY official mechanism to initialize a dropout descriptor,
-which means that law-abiding clients were expected to generate a dropout
-descriptor once and cache it.  However, our ATen interface is (1) stateless (so
-we can't cache the descriptors) and (2) does not accept arbitrary user types in
-its interface (so we can't pass the descriptor in).  This puts us in a pickle.
+多数情况下，cuDNN中的描述符设置是低开销的（例如cudnnSetTensorNdDescriptor）。  
+但cudnnSetDropoutDescriptor在cuDNN 6/7中会执行昂贵的预计算来初始化随机数生成器状态。  
+cuDNN 6中这是初始化dropout描述符的唯一官方方式，意味着规范用法需要缓存描述符。  
+然而ATen接口(1)无状态（无法缓存描述符）且(2)不接受用户自定义类型（无法传递描述符），导致两难境地。  
 
-In cuDNN 7, a new function, cudnnRestoreDropoutDescriptor was added, which
-forgoes the expensive initialization process, and can initialize the
-descriptor with a pre-initialized state CUDA tensor.  This is great, because
-it means we can simply pass in the state tensor and then initialize the
-descriptor internally.  Unfortunately, this function is not available in
-cuDNN 6.
+cuDNN 7新增了cudnnRestoreDropoutDescriptor函数，可通过预初始化CUDA张量跳过昂贵初始化过程。  
+遗憾的是该函数在cuDNN 6中不可用。  
 
-To work around this, we break the cuDNN abstraction barrier, and have
-the struct layout of the underlaying dropout descriptor.  With this struct,
-we can reimplement cudnnRestoreDropoutDescriptor from scratch. Great!
-*/
+解决方案是通过逆向工程获取底层dropout描述符结构布局，自主实现cudnnRestoreDropoutDescriptor功能。  
+*/  
 
-// Reverse engineered from cuDNN 6, see Note [cuDNN dropout descriptor initialization]
+// 基于cuDNN 6逆向工程实现，参见注释[cuDNN dropout描述符初始化]  
+
 struct cudnnDropoutStruct {
   float dropout;
   int nstates;
@@ -61,16 +51,14 @@ inline int dataSize(cudnnDataType_t dataType)
   }
 }
 
-// The stride for a size-1 dimensions is not uniquely determined; in
-// fact, it can be anything you want, because the fact that the
-// tensor is size 1 at this dimension means that you will never actually
-// try advancing your pointer by this stride.
-//
-// However, CuDNN has a much more stringent requirement on strides:
-// if you are passing a contiguous input, it better be the case
-// that the stride for dim i is the product of the sizes of dims
-// i+1 to the end.  This stride is indeed uniquely determined.  This
-// function modifies 'stride' in place so this invariant holds.
+// 对于大小为1的维度，其步长并非唯一确定——实际上可以设为任意值，
+// 因为该维度大小为1意味着永远不会真正通过此步长移动指针。
+
+// 但cuDNN对步长有更严格的要求：
+// 若传递的是连续内存输入，则必须保证第i维的步长等于
+// 第i+1维到末尾所有维度大小的乘积。此步长是唯一确定的。
+// 本函数会原地修改'stride'数组以确保该不变式成立。
+
 static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
   int64_t z = 1;
   for(int d = dim-1; d >= 0; d--)
